@@ -49,10 +49,15 @@ Deno.serve(withObservability('classify-document', async (req, { log, correlation
     return jsonError('Unauthorized.', 401, requestId);
   }
 
-  const anthropicApiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  // Null, not a hard failure: with no key configured, every job is routed
+  // straight to manual review instead of calling the AI at all (see
+  // processJob/markForManualReview below) — a deliberate "classification is
+  // off" mode, not classification erroring out. Jobs still get claimed and
+  // marked done either way, so nothing piles up waiting for a key that may
+  // never arrive.
+  const anthropicApiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? null;
   if (!anthropicApiKey) {
-    log.error('anthropic_api_key_missing');
-    return jsonError('Classification is not configured.', 500, requestId);
+    log.info('anthropic_api_key_missing_manual_review_mode');
   }
 
   const supabaseAdmin = createClient(
@@ -94,7 +99,7 @@ Deno.serve(withObservability('classify-document', async (req, { log, correlation
 async function processJob(
   supabaseAdmin: SupabaseClient,
   jobId: string,
-  anthropicApiKey: string,
+  anthropicApiKey: string | null,
   log: Logger,
 ): Promise<boolean> {
   const { data: job, error: claimError } = (await supabaseAdmin
@@ -107,7 +112,11 @@ async function processJob(
   }
 
   try {
-    await runClassification(supabaseAdmin, job, anthropicApiKey, log);
+    if (anthropicApiKey) {
+      await runClassification(supabaseAdmin, job, anthropicApiKey, log);
+    } else {
+      await markForManualReview(supabaseAdmin, job, log);
+    }
     await supabaseAdmin
       .from('classification_jobs')
       .update({ status: 'done', processed_at: new Date().toISOString() })
@@ -308,6 +317,53 @@ async function runClassification(
   // Every branch of applyOutcome() updates required_documents.status, which
   // is enough on its own to trigger a recompute (see comment above).
   await applyOutcome(supabaseAdmin, document, result.classification, outcome, log);
+}
+
+// The "classification is off" path (see the top-level handler's comment
+// on anthropicApiKey being null): skips the AI call entirely and routes
+// straight to the review queue. Deliberately leaves ai_classification /
+// ai_confidence untouched (null) — analytics_classification_outcomes
+// (0041) already scopes "AI accuracy" to documents the AI actually
+// produced a classification for, so a null here correctly excludes these
+// from that metric rather than counting them as some kind of AI outcome.
+async function markForManualReview(
+  supabaseAdmin: SupabaseClient,
+  job: ClassificationJob,
+  log: Logger,
+): Promise<void> {
+  const { data: document, error: documentError } = await supabaseAdmin
+    .from('documents')
+    .select('id, request_id, required_document_id, original_filename')
+    .eq('id', job.document_id)
+    .single();
+
+  if (documentError || !document) {
+    throw new Error(`Document not found: ${documentError?.message ?? job.document_id}`);
+  }
+
+  if (!document.required_document_id) {
+    throw new Error('Document has no required_document_id to reconcile against.');
+  }
+
+  await supabaseAdmin
+    .from('documents')
+    .update({ review_status: 'unreviewed', review_reason: 'manual_review_only' })
+    .eq('id', document.id);
+
+  await supabaseAdmin
+    .from('required_documents')
+    .update({ status: 'needs_review' })
+    .eq('id', document.required_document_id);
+
+  // The required_documents update above already fires
+  // required_documents_recompute_status (0028) — no explicit RPC needed.
+  await logActivity(supabaseAdmin, document, 'document_classified', {
+    outcome: 'needs_review',
+    flag: 'manual_review_only',
+  });
+  await notifyNeedsReview(supabaseAdmin, document);
+
+  log.info('routed_to_manual_review', { documentId: document.id });
 }
 
 async function applyOutcome(

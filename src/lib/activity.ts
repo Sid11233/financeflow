@@ -150,6 +150,7 @@ export function formatActivitySentence(entry: ActivityEntry, context: ActivityRe
       }
       if (outcome === 'needs_review') {
         const flag = str(payload, 'flag');
+        if (flag === 'manual_review_only') return `${filename} needs manual review — automatic classification is turned off.`;
         if (flag === 'unreadable') return `System could not read ${filename} clearly enough to classify it.`;
         if (flag === 'wrong_period') {
           return `System flagged ${filename} for review — detected ${detected ?? 'a document'} for the wrong period.`;
