@@ -1,0 +1,78 @@
+name: CI
+
+# Runs on every pull request against main. Each check is its own job so a
+# failure shows up as its own red X in the PR's checks list rather than one
+# opaque "CI failed" — see docs/deployment.md for what each one gates.
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test
+
+  test-edge-functions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # Pure-logic unit tests only (no DB, no network) — see the file's own
+      # header comment. Anything that needs the database is verified by
+      # hand against the linked project instead (this app has no local
+      # Postgres/Docker step in its dev workflow — see docs/deployment.md).
+      - run: deno test --node-modules-dir=none supabase/functions/_shared/*.test.ts
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          # Placeholder values — this build is only proving the bundle
+          # compiles, not deploying it. The real, environment-specific
+          # values are injected at build time in deploy-staging.yml /
+          # deploy-production.yml.
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_ANON_KEY: placeholder

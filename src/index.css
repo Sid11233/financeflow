@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Accent colour, expressed as "R G B" channels so Tailwind's
+     rgb(var(--color-accent) / <alpha-value>) syntax can apply opacity
+     modifiers (e.g. bg-accent/10). Swap this single value to rebrand. */
+  --color-accent: 37 99 235; /* blue-600 */
+  --color-accent-foreground: 255 255 255;
+}
+
+body {
+  @apply bg-neutral-50 text-neutral-900 antialiased;
+}

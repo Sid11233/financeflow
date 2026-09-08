@@ -1,0 +1,15 @@
+-- Reverts the dblink extension added in 0034. It was meant to let the
+-- pgTAP suite open a genuine second Postgres session and prove
+-- claim_due_reminders' FOR UPDATE SKIP LOCKED behavior under real
+-- concurrency. That turned out to be infeasible from this tooling: dblink
+-- self-connections require a password ("Non-superusers must provide a
+-- password in the connection string", confirmed empirically against this
+-- project), and no database password is available here to provide one —
+-- only the project URL and service-role API key, which authenticate HTTP
+-- calls, not direct Postgres connections. Rather than leave an installed-
+-- but-unused extension around, this drops it; see
+-- reminder_engine.test.sql for what concurrency safety is actually tested
+-- instead (the state-transition precondition that makes SKIP LOCKED
+-- meaningful, since SKIP LOCKED itself is core, independently-tested
+-- Postgres behavior, not something this project can usefully re-verify).
+drop extension if exists dblink;
