@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from '@/features/notifications/components/NotificationBell';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -13,7 +14,7 @@ const navItems = [
 ];
 
 export function AppLayout() {
-  const { profile } = useAuth();
+  const { profile, user, signOut } = useAuth();
 
   return (
     <div className="flex h-screen bg-neutral-50">
@@ -55,6 +56,17 @@ export function AppLayout() {
             </NavLink>
           )}
         </nav>
+        <div className="border-t border-neutral-100 p-2">
+          <div className="truncate px-3 py-1 text-xs text-neutral-400">{profile?.full_name ?? user?.email}</div>
+          <button
+            type="button"
+            onClick={() => signOut()}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            Log out
+          </button>
+        </div>
       </aside>
       <main className="flex-1 overflow-y-auto p-6">
         <Outlet />
