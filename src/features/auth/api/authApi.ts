@@ -41,13 +41,15 @@ export interface CreateOrganizationInput {
   password: string;
   fullName: string;
   firmName: string;
+  turnstileToken: string | null;
 }
 
 export async function createOrganization(input: CreateOrganizationInput) {
-  const { data, error } = await supabase.functions.invoke<{ userId: string; organizationId: string }>(
-    'create-organization',
-    { body: input },
-  );
+  const { data, error } = await supabase.functions.invoke<{
+    userId: string;
+    organizationId: string;
+    confirmationRequired: boolean;
+  }>('create-organization', { body: { ...input, appOrigin: window.location.origin } });
 
   if (error) throw new Error(await extractFunctionErrorMessage(error));
   return data!;

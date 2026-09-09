@@ -1,16 +1,16 @@
 import { useMutation } from '@tanstack/react-query';
-import { createOrganization, signInWithPassword } from '../api/authApi';
+import { createOrganization } from '../api/authApi';
 import type { CreateOrganizationInput } from '../api/authApi';
 
+// Deliberately does not sign in after creating the account — the account
+// is created unconfirmed (see create-organization's own comment on why),
+// and signInWithPassword would just fail with "Email not confirmed" right
+// after a successful signup. The caller shows a "check your email"
+// screen instead; the confirmation link itself establishes the session
+// once clicked (Supabase redirects back with tokens in the URL, which
+// supabase-js picks up automatically).
 export function useSignup() {
   return useMutation({
-    mutationFn: async (input: CreateOrganizationInput) => {
-      await createOrganization(input);
-      // create-organization only creates the account server-side; it can't
-      // hand back a browser session, so sign in normally right after with
-      // the same credentials the form already collected.
-      const { error } = await signInWithPassword(input.email, input.password);
-      if (error) throw error;
-    },
+    mutationFn: (input: CreateOrganizationInput) => createOrganization(input),
   });
 }

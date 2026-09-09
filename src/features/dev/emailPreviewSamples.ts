@@ -166,4 +166,11 @@ export const EMAIL_PREVIEW_SAMPLES: EmailPreviewSample[] = [
       ],
     },
   },
+  {
+    template: 'confirm_signup',
+    label: '12. Confirm signup email',
+    variables: {
+      confirmUrl: 'https://financeflow.app/auth/confirm?token=sample',
+    },
+  },
 ];

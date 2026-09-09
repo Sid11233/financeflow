@@ -10,6 +10,7 @@ import * as teamInvite from './templates/teamInvite.tsx';
 import * as linkExpiredRequest from './templates/linkExpiredRequest.tsx';
 import * as customMessage from './templates/customMessage.tsx';
 import * as reminderBatch from './templates/reminderBatch.tsx';
+import * as confirmSignup from './templates/confirmSignup.tsx';
 
 export const TEMPLATE_NAMES = [
   'request_initial',
@@ -23,6 +24,7 @@ export const TEMPLATE_NAMES = [
   'link_expired_request',
   'custom_message',
   'reminder_batch',
+  'confirm_signup',
 ] as const;
 
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
@@ -47,6 +49,7 @@ const registry: Record<TemplateName, TemplateModule> = {
   link_expired_request: linkExpiredRequest,
   custom_message: customMessage,
   reminder_batch: reminderBatch,
+  confirm_signup: confirmSignup,
 };
 
 export function isTemplateName(value: string): value is TemplateName {
