@@ -9,6 +9,16 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders, jsonError, jsonResponse } from '../_shared/cors.ts';
 import { withObservability } from '../_shared/sentry.ts';
+import { checkRateLimit, rateLimitedResponse } from '../_shared/rateLimit.ts';
+import { getClientIp } from '../_shared/ip.ts';
+import { validatePasswordStrength } from '../_shared/passwordStrength.ts';
+
+// Deliberately strict — legitimate signup from one IP is rare (a firm
+// signs up once), while this endpoint minting a real, immediately-usable
+// account per call makes it the highest-value target in the app for
+// scripted abuse (spam accounts, disposable-email spray, credential
+// testing against the "already exists" response).
+const IP_LIMIT = 5;
 
 interface CreateOrganizationPayload {
   email: string;
@@ -20,6 +30,18 @@ interface CreateOrganizationPayload {
 Deno.serve(withObservability('create-organization', async (req, { log, correlationId: requestId }) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return jsonError('Method not allowed.', 405, requestId);
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  );
+
+  const ip = getClientIp(req);
+  const ipLimit = await checkRateLimit(supabaseAdmin, `signup:${ip}`, IP_LIMIT, log);
+  if (!ipLimit.allowed) {
+    log.warn('rate_limited', { scope: 'ip' });
+    return rateLimitedResponse(ipLimit.retryAfterSeconds, requestId);
+  }
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return jsonError('Invalid request.', 400, requestId);
@@ -38,14 +60,10 @@ Deno.serve(withObservability('create-organization', async (req, { log, correlati
     : '';
 
   if (!email.includes('@')) return jsonError('A valid email is required.', 400, requestId);
-  if (password.length < 8) return jsonError('Password must be at least 8 characters.', 400, requestId);
+  const passwordError = validatePasswordStrength(password);
+  if (passwordError) return jsonError(passwordError, 400, requestId);
   if (!fullName) return jsonError('Your name is required.', 400, requestId);
   if (!firmName) return jsonError('Firm name is required.', 400, requestId);
-
-  const supabaseAdmin = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  );
 
   const { data: userData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
     email,

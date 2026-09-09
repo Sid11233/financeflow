@@ -10,6 +10,16 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders, jsonError, jsonResponse } from '../_shared/cors.ts';
 import { withObservability } from '../_shared/sentry.ts';
+import { checkRateLimit, rateLimitedResponse } from '../_shared/rateLimit.ts';
+import { getClientIp } from '../_shared/ip.ts';
+import { validatePasswordStrength } from '../_shared/passwordStrength.ts';
+
+const IP_LIMIT = 20;
+// Separate, tighter limit keyed on the specific token being tried —
+// same two-tier pattern as the client portal's own token endpoints
+// (see portal-resolve): slows down brute-forcing one guessed/leaked
+// invite token specifically, on top of the general per-IP cap above.
+const TOKEN_LIMIT = 10;
 
 interface InviteRow {
   id: string;
@@ -25,18 +35,34 @@ Deno.serve(withObservability('accept-invite', async (req, { log, correlationId: 
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return jsonError('Method not allowed.', 405, requestId);
 
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  );
+
+  const ip = getClientIp(req);
+  const ipLimit = await checkRateLimit(supabaseAdmin, `ip:${ip}`, IP_LIMIT, log);
+  if (!ipLimit.allowed) {
+    log.warn('rate_limited', { scope: 'ip' });
+    return rateLimitedResponse(ipLimit.retryAfterSeconds, requestId);
+  }
+
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return jsonError('Invalid request.', 400, requestId);
 
   const action = (body as { action?: unknown }).action;
   const token = typeof (body as { token?: unknown }).token === 'string' ? (body as { token: string }).token : '';
 
-  const supabaseAdmin = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  );
+  if (!token) return jsonError('This invite link is invalid.', 400, requestId);
 
-  const invite = await lookupInvite(supabaseAdmin, token);
+  const tokenHash = await sha256Hex(token);
+  const tokenLimit = await checkRateLimit(supabaseAdmin, `token:${tokenHash}`, TOKEN_LIMIT, log);
+  if (!tokenLimit.allowed) {
+    log.warn('rate_limited', { scope: 'token' });
+    return rateLimitedResponse(tokenLimit.retryAfterSeconds, requestId);
+  }
+
+  const invite = await lookupInvite(supabaseAdmin, tokenHash);
   if (!invite.ok) return jsonError(invite.message, invite.status, requestId);
 
   if (action === 'lookup') {
@@ -55,7 +81,8 @@ Deno.serve(withObservability('accept-invite', async (req, { log, correlationId: 
       ? (body as { fullName: string }).fullName.trim()
       : '';
 
-    if (password.length < 8) return jsonError('Password must be at least 8 characters.', 400, requestId);
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) return jsonError(passwordError, 400, requestId);
     if (!fullName) return jsonError('Your name is required.', 400, requestId);
 
     const { data: userData, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
@@ -101,11 +128,7 @@ Deno.serve(withObservability('accept-invite', async (req, { log, correlationId: 
   return jsonError('Unknown action.', 400, requestId);
 }));
 
-async function lookupInvite(supabaseAdmin: SupabaseClient, token: string): Promise<LookupResult> {
-  if (!token) return { ok: false, message: 'This invite link is invalid.', status: 400 };
-
-  const tokenHash = await sha256Hex(token);
-
+async function lookupInvite(supabaseAdmin: SupabaseClient, tokenHash: string): Promise<LookupResult> {
   const { data: row, error } = await supabaseAdmin
     .from('invites')
     .select('id, email, role, organization_id, expires_at, revoked_at, accepted_at, organizations(name)')
